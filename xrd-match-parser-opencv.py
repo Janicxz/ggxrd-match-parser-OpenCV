@@ -27,15 +27,6 @@ class Mask(object):
         self.filepath = filepath
         self.template = cv2.imread('{}/{}'.format(MASKS_DIRPATH, filepath),0)
 
-#PLAYER_MASKS = [
-#    Mask('players/{}'.format(filepath))
-#    for filepath in os.listdir('{}/players'.format(MASKS_DIRPATH))
-#]
-
-TEST_MASKS = [
-    Mask('test/{}'.format(filepath))
-    for filepath in os.listdir('{}/test'.format(MASKS_DIRPATH))
-]
 PLAYER_MASKS = [
     Mask('players/{}'.format(filepath))
     for filepath in os.listdir('{}/players'.format(MASKS_DIRPATH))
@@ -45,6 +36,7 @@ CHARACTER_MASKS = [
     for filepath in os.listdir('{}/characters'.format(MASKS_DIRPATH))
 ]
 VS_MASK = Mask('vs.png')
+INSERT_COIN_MASK = Mask('insert-coin-left.png')
 
 FILE_OUTPUT = "matches.html"
 
@@ -76,7 +68,9 @@ def format_timestamp(secs):
 
 #URL = "https://www.youtube.com/watch?v=q3DY8EPtFMY"
 def writeToHtml(foundMatches, youtubeUrl):
+    youtubeVideoCode = youtubeUrl.split('=')[-1]
     htmlFile = open(FILE_OUTPUT, "w")
+    htmlFile.write('<iframe width="420" height="345" src="https://www.youtube.com/embed/{}"></iframe><br>'.format(youtubeVideoCode))
     for match in foundMatches:
         htmlFile.write('<a href={}#t={}>{} {} ({}) vs {} ({})</a><br>\n'.format(
             youtubeUrl,
@@ -134,29 +128,28 @@ if __name__ == '__main__':
     for sec, clip_frame in clip.iter_frames(with_times=True,dtype="uint8"):
         if sec < next_sec:
             continue
-       # clip_frame_rgb = clip_frame.flatten()
-        #print(clip_frame)
+
         # Convert to BRG so we can display it properly for debug.
-        clip_frame_bgr = cv2.cvtColor(clip_frame, cv2.COLOR_RGB2BGR)
+        #clip_frame_bgr = cv2.cvtColor(clip_frame, cv2.COLOR_RGB2BGR)
         # Convert to grayscale for faster analysis
         clip_frame_gray = cv2.cvtColor(clip_frame, cv2.COLOR_RGB2GRAY)
-        #print(nparray)
 
-        foundMatch = Match(0, "unknown","unknown","unknown","unknown")
+        # Found training mode, skip it
+        if matchTemplate(INSERT_COIN_MASK.template, clip_frame_gray, 0.8):
+            next_sec = sec + 8
+            continue
+
         
-        #Find VS screen
+        # Found VS screen
         if matchTemplate(VS_MASK.template, clip_frame_gray, 0.8):
             #print("found VS")
+            foundMatch = Match(0, "unknown","unknown","unknown","unknown")
             #Search for all characters
             ###########
             for char_mask in CHARACTER_MASKS:
-                #test_mask.template = cv2.imread(test_mask.filepath,0)
-                #print(test_mask.template)
-                #print(test_mask.filepath)
-
                 #We already found both characters, no need to continue searching.
                 if foundMatch.charLeft != "unknown" and foundMatch.charRight != "unknown":
-                    print("both characters found!")
+                    #debug print("both characters found!")
                     continue
 
                 w, h = char_mask.template.shape[::-1] # invert W, H. shape returns them inverted.
@@ -165,42 +158,38 @@ if __name__ == '__main__':
 
                 location = np.where( result >= threshold) 
                 if len(location[0])!= 0:
-                    print("Found template: ", char_mask.filepath," At time: ", sec)
+                    #debug print("Found template: ", char_mask.filepath," At time: ", sec)
                     if '-left' in os.path.basename(char_mask.filepath):
                         foundMatch.charLeft = os.path.basename(char_mask.filepath).split('-')[0]
-                        print("Character left: ", foundMatch.charLeft)
+                        #debug print("Character left: ", foundMatch.charLeft)
                     else:
                         foundMatch.charRight = os.path.basename(char_mask.filepath).split('-')[0]
-                        print("Character right: ", foundMatch.charRight)
+                        #debug print("Character right: ", foundMatch.charRight)
                     #os.path.basename(char_mask.filepath).split('-')[0]
                     # Draw a rectangle around the matched region.
-                    for pt in zip(*location[::-1]):
-                        cv2.rectangle(clip_frame_bgr, pt, (pt[0] + w, pt[1] + h), (0,255,255), 2)
+                    #for pt in zip(*location[::-1]):
+                    #    cv2.rectangle(clip_frame_bgr, pt, (pt[0] + w, pt[1] + h), (0,255,255), 2)
             
             #Search for all known player names
             ##########
             for player_mask in PLAYER_MASKS:
-                #test_mask.template = cv2.imread(test_mask.filepath,0)
-                #print(test_mask.template)
-                #print(test_mask.filepath)
-
                 w, h = player_mask.template.shape[::-1] # invert W, H. shape returns them inverted.
                 result = cv2.matchTemplate(clip_frame_gray,player_mask.template,cv2.TM_CCOEFF_NORMED)
                 threshold = 0.8
 
                 location = np.where( result >= threshold) 
                 if len(location[0])!= 0:
-                    print("Found template: ", player_mask.filepath," At time: ", sec)
+                    #debug print("Found template: ", player_mask.filepath," At time: ", sec)
                     if '-left' in os.path.basename(player_mask.filepath):
                         foundMatch.playerOne = os.path.basename(player_mask.filepath).split('-')[0]
-                        print("Player one: ", foundMatch.playerOne)
+                        #debug print("Player one: ", foundMatch.playerOne)
                     else:
                         foundMatch.playerTwo = os.path.basename(player_mask.filepath).split('-')[0]
-                        print("Player two: ", foundMatch.playerTwo)
+                        #debug print("Player two: ", foundMatch.playerTwo)
                     #os.path.basename(char_mask.filepath).split('-')[0]
                     # Draw a rectangle around the matched region.
-                    for pt in zip(*location[::-1]):
-                        cv2.rectangle(clip_frame_bgr, pt, (pt[0] + w, pt[1] + h), (0,255,255), 2)
+                    #for pt in zip(*location[::-1]):
+                    #    cv2.rectangle(clip_frame_bgr, pt, (pt[0] + w, pt[1] + h), (0,255,255), 2)
             foundMatch.timeStamp = sec
             print("Found match, {} ({}) vs {} ({}) at {}".format(foundMatch.charLeft, 
             foundMatch.playerOne, foundMatch.charRight, foundMatch.playerTwo, format_timestamp(foundMatch.timeStamp)
