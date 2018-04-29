@@ -10,7 +10,9 @@ from moviepy.video.io.VideoFileClip import VideoFileClip
 from PIL import Image
 
 # TODO:
+# Optimize: restrict template matching search area? RESULT: does not seem to be any faster.
 # extract ranks from the vid? (color at least? translate the ranks from VS screen?)
+# RESULT: 240p and below too low quality to extract rank colors.
 # Look into 360p/480p processing? parse from ROUND 1 screen instead of VS?
 # if we're parsing from round start, could look for side independent char template,
 # and check the template match position (left/right side of the screen?)
@@ -128,7 +130,8 @@ if __name__ == '__main__':
     foundMatches = []
     next_sec = 0
     # 2m 55s on 240p with roundstart search
-    #  00:03:24 with practice mode detection
+    # 00:03:24 with practice mode detection
+    # 00:03:24 with cropped frames, pointless optimization?
     # around 2m on 240p without roundstart and pmode detect
     benchmarkTimeStart = time.time() #see how long we took to process the video file.
     lookingForRoundOne = False
@@ -149,22 +152,15 @@ if __name__ == '__main__':
             if matchTemplate(training_mask.template, clip_frame_gray, 0.8):
                 inTrainingMode = True
                 break
-
-        #if matchTemplate(INSERT_COIN_LEFT_MASK.template, clip_frame_gray, 0.8) or matchTemplate(INSERT_COIN_RIGHT_MASK.template, clip_frame_gray, 0.8):
-        #    next_sec = sec + 8
-        #    continue
-
         # Idle machine, skip ahead.
         if matchTemplate(PRESS_START_MASK.template, clip_frame_gray, 0.8):
             next_sec = sec + SKIP_SECS
             continue
-
         if inTrainingMode:
             inTrainingMode = False
             next_sec = sec + 8
             #print("Found training mode at ", sec)
             continue
-
         # Found round start
         if lookingForRoundOne and matchTemplate(ROUND_TIMER_99.template, clip_frame_gray, 0.8):
             #print("Found round 1 at ", sec)
@@ -187,7 +183,7 @@ if __name__ == '__main__':
             #else:
             #    p2_rank = "blue"
             #print("Found ranks, RGB p1: ", rank_color_p1, " p2: ", rank_color_p2, " Detect P1 ", p1_rank, " P2 ", p2_rank)
-            
+
             foundMatch.timeStamp = sec
             print("Found match, {} ({}) vs {} ({}) at {}".format(foundMatch.charLeft, 
             foundMatch.playerOne, foundMatch.charRight, foundMatch.playerTwo, format_timestamp(foundMatch.timeStamp)
@@ -196,6 +192,9 @@ if __name__ == '__main__':
 
             lookingForRoundOne = False
             next_sec = sec + SKIP_SECS
+            #show debug frame detection
+            # cv2.imshow('Frame',clip_frame_bgr)
+            #cv2.waitKey(0)
             continue
 
         # Found VS screen
@@ -203,6 +202,7 @@ if __name__ == '__main__':
             #print("found VS")
             # Reset the found match info
             foundMatch = Match(0, "unknown","unknown","unknown","unknown")
+            ###########
             #Search for all characters
             ###########
             for char_mask in CHARACTER_MASKS:
@@ -211,12 +211,9 @@ if __name__ == '__main__':
                     #debug print("both characters found!")
                     break
 
+                #for drawing
                 #w, h = char_mask.template.shape[::-1] # invert W, H. shape returns them inverted.
-                result = cv2.matchTemplate(clip_frame_gray,char_mask.template,cv2.TM_CCOEFF_NORMED)
-                threshold = 0.7
-
-                location = np.where( result >= threshold) 
-                if len(location[0])!= 0:
+                if matchTemplate(char_mask.template, clip_frame_gray, 0.7):
                     #debug print("Found template: ", char_mask.filepath," At time: ", sec)
                     if '-left' in os.path.basename(char_mask.filepath):
                         foundMatch.charLeft = os.path.basename(char_mask.filepath).split('-')[0]
@@ -224,20 +221,17 @@ if __name__ == '__main__':
                     else:
                         foundMatch.charRight = os.path.basename(char_mask.filepath).split('-')[0]
                         #debug print("Character right: ", foundMatch.charRight)
-                    #os.path.basename(char_mask.filepath).split('-')[0]
+
                     # Draw a rectangle around the matched region.
                     #for pt in zip(*location[::-1]):
                     #    cv2.rectangle(clip_frame_bgr, pt, (pt[0] + w, pt[1] + h), (0,255,255), 2)
-            
+            ##########
             #Search for all known player names
             ##########
             for player_mask in PLAYER_MASKS:
+                #for drawing
                 #w, h = player_mask.template.shape[::-1] # invert W, H. shape returns them inverted.
-                result = cv2.matchTemplate(clip_frame_gray,player_mask.template,cv2.TM_CCOEFF_NORMED)
-                threshold = 0.8
-
-                location = np.where( result >= threshold) 
-                if len(location[0])!= 0:
+                if matchTemplate(player_mask.template, clip_frame_gray, 0.8):
                     #debug print("Found template: ", player_mask.filepath," At time: ", sec)
                     if '-left' in os.path.basename(player_mask.filepath):
                         foundMatch.playerOne = os.path.basename(player_mask.filepath).split('-')[0]
@@ -245,23 +239,12 @@ if __name__ == '__main__':
                     else:
                         foundMatch.playerTwo = os.path.basename(player_mask.filepath).split('-')[0]
                         #debug print("Player two: ", foundMatch.playerTwo)
-                    #os.path.basename(char_mask.filepath).split('-')[0]
+
                     # Draw a rectangle around the matched region.
                     #for pt in zip(*location[::-1]):
                     #    cv2.rectangle(clip_frame_bgr, pt, (pt[0] + w, pt[1] + h), (0,255,255), 2)
-            
             # Found the info from VS screen, now find the round start.
             lookingForRoundOne = True
-            #foundMatch.timeStamp = sec
-            #print("Found match, {} ({}) vs {} ({}) at {}".format(foundMatch.charLeft, 
-            #foundMatch.playerOne, foundMatch.charRight, foundMatch.playerTwo, format_timestamp(foundMatch.timeStamp)
-            # ))
-            # foundMatches.append(foundMatch)
-
-           # cv2.imshow('Frame',clip_frame_bgr)
-            #cv2.waitKey(0)
-            
-            #next_sec = sec + SKIP_SECS
             next_sec = sec + 6 # about 6s to load into intros from VS 
         else:
             next_sec = sec + SEEK_SECS
