@@ -2,12 +2,22 @@ import os
 import datetime
 import argparse
 import subprocess
+import time
 
 import cv2
 import numpy as np
 from moviepy.video.io.VideoFileClip import VideoFileClip
 from PIL import Image
 
+# TODO:
+# extract ranks from the vid? (color at least? translate the ranks from VS screen?)
+# Look into 360p/480p processing? parse from ROUND 1 screen instead of VS?
+# if we're parsing from round start, could look for side independent char template,
+# and check the template match position (left/right side of the screen?)
+# Save matches to sqlite database instead of html file
+# Check if we've processed the vod already earlier (sqlite?)
+# Dynamic site that loads from the db?
+# Fetch latest videos from joniosan YT channel with RSS?
 
 MASKS_DIRPATH = os.path.join(
     os.path.dirname(__file__),
@@ -36,18 +46,16 @@ CHARACTER_MASKS = [
     for filepath in os.listdir('{}/characters'.format(MASKS_DIRPATH))
 ]
 VS_MASK = Mask('vs.png')
-INSERT_COIN_MASK = Mask('insert-coin-left.png')
 
+TRAINING_MODE_MASKS = [
+    Mask('insert_coin_left.png'),
+    Mask('insert_coin_right.png'),
+    Mask('vs_ai_opponent.png')
+]
+PRESS_START_MASK = Mask('press_start.png')
+#ROUND_ONE = Mask('duel_one.png')
+ROUND_TIMER_99 = Mask('round_timer_99.png')
 FILE_OUTPUT = "matches.html"
-
-# Read the main image
-img_rgb = cv2.imread('test_image.png')
-
-# Convert it to grayscale
-img_gray = cv2.cvtColor(img_rgb, cv2.COLOR_BGR2GRAY)
-
-# Read the template
-#template = cv2.imread('omito-right_test.png',0)
 
 def matchTemplate(template, image, treshold):
     result = cv2.matchTemplate(image, template, cv2.TM_CCOEFF_NORMED)
@@ -66,7 +74,6 @@ def format_timestamp(secs):
         str(datetime.timedelta(seconds=int(secs))),
     )
 
-#URL = "https://www.youtube.com/watch?v=q3DY8EPtFMY"
 def writeToHtml(foundMatches, youtubeUrl):
     youtubeVideoCode = youtubeUrl.split('=')[-1]
     htmlFile = open(FILE_OUTPUT, "w")
@@ -82,10 +89,6 @@ def writeToHtml(foundMatches, youtubeUrl):
             match.playerTwo,
             ))
     htmlFile.close()
-#def findPlayerName(filename):
-#     player_name = lambda s: os.path.basename(s).split('-')[0]
-
-
 
 videoFileName = "video.webm"
 SKIP_SECS = 20
@@ -124,6 +127,13 @@ if __name__ == '__main__':
     clip = VideoFileClip(videoFileName, audio=False)
     foundMatches = []
     next_sec = 0
+    # 2m 55s on 240p with roundstart search
+    #  00:03:24 with practice mode detection
+    # around 2m on 240p without roundstart and pmode detect
+    benchmarkTimeStart = time.time() #see how long we took to process the video file.
+    lookingForRoundOne = False
+    inTrainingMode = False
+    foundMatch = Match(0, "unknown","unknown","unknown","unknown")
 
     for sec, clip_frame in clip.iter_frames(with_times=True,dtype="uint8"):
         if sec < next_sec:
@@ -134,15 +144,64 @@ if __name__ == '__main__':
         # Convert to grayscale for faster analysis
         clip_frame_gray = cv2.cvtColor(clip_frame, cv2.COLOR_RGB2GRAY)
 
-        # Found training mode, skip it
-        if matchTemplate(INSERT_COIN_MASK.template, clip_frame_gray, 0.8):
-            next_sec = sec + 8
+        # Found training mode, skip ahead
+        for training_mask in TRAINING_MODE_MASKS:
+            if matchTemplate(training_mask.template, clip_frame_gray, 0.8):
+                inTrainingMode = True
+                break
+
+        #if matchTemplate(INSERT_COIN_LEFT_MASK.template, clip_frame_gray, 0.8) or matchTemplate(INSERT_COIN_RIGHT_MASK.template, clip_frame_gray, 0.8):
+        #    next_sec = sec + 8
+        #    continue
+
+        # Idle machine, skip ahead.
+        if matchTemplate(PRESS_START_MASK.template, clip_frame_gray, 0.8):
+            next_sec = sec + SKIP_SECS
             continue
 
-        
+        if inTrainingMode:
+            inTrainingMode = False
+            next_sec = sec + 8
+            #print("Found training mode at ", sec)
+            continue
+
+        # Found round start
+        if lookingForRoundOne and matchTemplate(ROUND_TIMER_99.template, clip_frame_gray, 0.8):
+            #print("Found round 1 at ", sec)
+
+            # RANK DETECTION
+            #rank_color_p1 = clip_frame[58,21]
+            #rank_color_p2 = clip_frame[58,409]
+            #p1_rank = ""
+            #p2_rank = ""
+            #if rank_color_p1[0] > 60 and rank_color_p1[1] < 50 and rank_color_p1[1] < 50:
+            #    p1_rank = "red"
+            #elif rank_color_p1[0] >= 150 and rank_color_p1[1] > 130 and rank_color_p1[1] < 80:
+            #    p1_rank = "gold"
+            #else:
+            #    p1_rank = "blue"
+            #if rank_color_p2[0] > 60 and rank_color_p2[1] < 50 and rank_color_p2[1] < 50:
+            #    p2_rank = "red"
+            #elif rank_color_p2[0] > 150 and rank_color_p2[1] > 130 and rank_color_p2[1] < 80:
+            #    p2_rank = "gold"
+            #else:
+            #    p2_rank = "blue"
+            #print("Found ranks, RGB p1: ", rank_color_p1, " p2: ", rank_color_p2, " Detect P1 ", p1_rank, " P2 ", p2_rank)
+            
+            foundMatch.timeStamp = sec
+            print("Found match, {} ({}) vs {} ({}) at {}".format(foundMatch.charLeft, 
+            foundMatch.playerOne, foundMatch.charRight, foundMatch.playerTwo, format_timestamp(foundMatch.timeStamp)
+            ))
+            foundMatches.append(foundMatch)
+
+            lookingForRoundOne = False
+            next_sec = sec + SKIP_SECS
+            continue
+
         # Found VS screen
-        if matchTemplate(VS_MASK.template, clip_frame_gray, 0.8):
+        if not lookingForRoundOne and matchTemplate(VS_MASK.template, clip_frame_gray, 0.8):
             #print("found VS")
+            # Reset the found match info
             foundMatch = Match(0, "unknown","unknown","unknown","unknown")
             #Search for all characters
             ###########
@@ -150,9 +209,9 @@ if __name__ == '__main__':
                 #We already found both characters, no need to continue searching.
                 if foundMatch.charLeft != "unknown" and foundMatch.charRight != "unknown":
                     #debug print("both characters found!")
-                    continue
+                    break
 
-                w, h = char_mask.template.shape[::-1] # invert W, H. shape returns them inverted.
+                #w, h = char_mask.template.shape[::-1] # invert W, H. shape returns them inverted.
                 result = cv2.matchTemplate(clip_frame_gray,char_mask.template,cv2.TM_CCOEFF_NORMED)
                 threshold = 0.7
 
@@ -173,7 +232,7 @@ if __name__ == '__main__':
             #Search for all known player names
             ##########
             for player_mask in PLAYER_MASKS:
-                w, h = player_mask.template.shape[::-1] # invert W, H. shape returns them inverted.
+                #w, h = player_mask.template.shape[::-1] # invert W, H. shape returns them inverted.
                 result = cv2.matchTemplate(clip_frame_gray,player_mask.template,cv2.TM_CCOEFF_NORMED)
                 threshold = 0.8
 
@@ -190,17 +249,25 @@ if __name__ == '__main__':
                     # Draw a rectangle around the matched region.
                     #for pt in zip(*location[::-1]):
                     #    cv2.rectangle(clip_frame_bgr, pt, (pt[0] + w, pt[1] + h), (0,255,255), 2)
-            foundMatch.timeStamp = sec
-            print("Found match, {} ({}) vs {} ({}) at {}".format(foundMatch.charLeft, 
-            foundMatch.playerOne, foundMatch.charRight, foundMatch.playerTwo, format_timestamp(foundMatch.timeStamp)
-            ))
-            foundMatches.append(foundMatch)
+            
+            # Found the info from VS screen, now find the round start.
+            lookingForRoundOne = True
+            #foundMatch.timeStamp = sec
+            #print("Found match, {} ({}) vs {} ({}) at {}".format(foundMatch.charLeft, 
+            #foundMatch.playerOne, foundMatch.charRight, foundMatch.playerTwo, format_timestamp(foundMatch.timeStamp)
+            # ))
+            # foundMatches.append(foundMatch)
 
            # cv2.imshow('Frame',clip_frame_bgr)
             #cv2.waitKey(0)
             
-            next_sec = sec + SKIP_SECS
+            #next_sec = sec + SKIP_SECS
+            next_sec = sec + 6 # about 6s to load into intros from VS 
         else:
             next_sec = sec + SEEK_SECS
+
+    benchmarkTimeEnd = time.time()
+    benchmarkTimeElapsed = benchmarkTimeEnd - benchmarkTimeStart
+    print("Processed the video in ", time.strftime("%H:%M:%S", time.gmtime(benchmarkTimeElapsed)))
     print("Writing to html.")
     writeToHtml(foundMatches, args.youtube_url)
