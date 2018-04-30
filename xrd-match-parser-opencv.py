@@ -10,8 +10,9 @@ from moviepy.video.io.VideoFileClip import VideoFileClip
 from PIL import Image
 
 # TODO:
+# Flag round start times at 240p/worst quality and download 720P frames from the specific times we found?
 # Optimize: restrict template matching search area? RESULT: does not seem to be any faster.
-# extract ranks from the vid? (color at least? translate the ranks from VS screen?)
+# extract ranks from the vid? (color at least? translate the ranks from VS screen?) (green(1-?), blue(?-21?), red(?-24), gold)
 # RESULT: 240p and below too low quality to extract rank colors.
 # Look into 360p/480p processing? parse from ROUND 1 screen instead of VS?
 # if we're parsing from round start, could look for side independent char template,
@@ -47,7 +48,8 @@ CHARACTER_MASKS = [
     Mask('characters/{}'.format(filepath))
     for filepath in os.listdir('{}/characters'.format(MASKS_DIRPATH))
 ]
-VS_MASK = Mask('vs.png')
+VS_MASK = Mask('vs.png') #240P
+#VS_MASK = Mask('vs_360p.png') #360p
 
 TRAINING_MODE_MASKS = [
     Mask('insert_coin_left.png'),
@@ -56,19 +58,23 @@ TRAINING_MODE_MASKS = [
 ]
 PRESS_START_MASK = Mask('press_start.png')
 #ROUND_ONE = Mask('duel_one.png')
-ROUND_TIMER_99 = Mask('round_timer_99.png')
+#ROUND_START = Mask('lets_rock.png') 360P
+#ROUND_TIMER_99 = Mask('lets_rock.png') #360P
+ROUND_TIMER_99 = Mask('round_timer_99.png') #240P
 FILE_OUTPUT = "matches.html"
 
-def matchTemplate(template, image, treshold):
+def matchTemplate(template, image, treshold, return_location=False):
+    # _NORMED returns correlation based value from 1.0 to 0.0 (1.0 being perfect match)
     result = cv2.matchTemplate(image, template, cv2.TM_CCOEFF_NORMED)
-    location = np.where( result >= treshold)
+    min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(result)
 
-    #print(location)
-    if len(location[0])!= 0:
+    if max_val >= treshold:
        # print("Found template.")
+        if return_location:
+           return max_loc
         return True
     else:
-       # print("Didn't find anything")
+       # print("No template matched.")
         return False
 
 def format_timestamp(secs):
@@ -92,9 +98,25 @@ def writeToHtml(foundMatches, youtubeUrl):
             ))
     htmlFile.close()
 
-videoFileName = "video.webm"
-SKIP_SECS = 20
-SEEK_SECS = 0.5
+#Download only the frames we're interested in at 720P
+def downloadFrames(foundMatches, url):
+    #TODO:
+    # Delete previously downloaded frames
+    count = 0
+    for match in foundMatches:
+        #downloadUrl = subprocess.check_output(['youtube-dl', '--format "bestvideo[height=720]"', '-g', url])
+        downloadUrl = subprocess.check_output('youtube-dl --format "bestvideo[height=720]" -g {}'.format(url)).decode('utf-8').strip()
+        subprocess.check_call('ffmpeg -ss {} -i "{}" -t 1 -map 0:v -c:v libvpx frames/frame_{}.webm'.format(
+            str(datetime.timedelta(seconds=int(match.timeStamp))),
+            downloadUrl,
+            count
+        ))
+        count = count+1
+
+videoFileName = "video.webm" #240P
+#videoFileName = "test_360p.webm" #360P
+SKIP_SECS = 60 #20
+SEEK_SECS = 1 #0.5
 if __name__ == '__main__':
     # https://www.youtube.com/watch?v=q3DY8EPtFMY test clip
 
@@ -132,6 +154,8 @@ if __name__ == '__main__':
     # 2m 55s on 240p with roundstart search
     # 00:03:24 with practice mode detection
     # 00:03:24 with cropped frames, pointless optimization?
+    # 00:01:52 with optimal seek/skip times. Does not seem to be less accurate with adjusted values.
+    # 00:02:46 with 0.5 SEEK and 60 skip
     # around 2m on 240p without roundstart and pmode detect
     benchmarkTimeStart = time.time() #see how long we took to process the video file.
     lookingForRoundOne = False
@@ -142,12 +166,12 @@ if __name__ == '__main__':
         if sec < next_sec:
             continue
 
-        # Convert to BRG so we can display it properly for debug.
+        # Convert to BRG for debug frame
         #clip_frame_bgr = cv2.cvtColor(clip_frame, cv2.COLOR_RGB2BGR)
         # Convert to grayscale for faster analysis
         clip_frame_gray = cv2.cvtColor(clip_frame, cv2.COLOR_RGB2GRAY)
 
-        # Found training mode, skip ahead
+        # Check if the player has no opponent.
         for training_mask in TRAINING_MODE_MASKS:
             if matchTemplate(training_mask.template, clip_frame_gray, 0.8):
                 inTrainingMode = True
@@ -158,13 +182,11 @@ if __name__ == '__main__':
             continue
         if inTrainingMode:
             inTrainingMode = False
-            next_sec = sec + 8
+            next_sec = sec + 8 # Skip a bit ahead out of training mode VS screen
             #print("Found training mode at ", sec)
             continue
         # Found round start
         if lookingForRoundOne and matchTemplate(ROUND_TIMER_99.template, clip_frame_gray, 0.8):
-            #print("Found round 1 at ", sec)
-
             # RANK DETECTION
             #rank_color_p1 = clip_frame[58,21]
             #rank_color_p2 = clip_frame[58,409]
@@ -192,14 +214,13 @@ if __name__ == '__main__':
 
             lookingForRoundOne = False
             next_sec = sec + SKIP_SECS
-            #show debug frame detection
+            #show debug frame
             # cv2.imshow('Frame',clip_frame_bgr)
             #cv2.waitKey(0)
             continue
 
         # Found VS screen
-        if not lookingForRoundOne and matchTemplate(VS_MASK.template, clip_frame_gray, 0.8):
-            #print("found VS")
+        if not lookingForRoundOne and matchTemplate(VS_MASK.template, clip_frame_gray, 0.7):
             # Reset the found match info
             foundMatch = Match(0, "unknown","unknown","unknown","unknown")
             ###########
@@ -211,8 +232,15 @@ if __name__ == '__main__':
                     #debug print("both characters found!")
                     break
 
-                #for drawing
+                #for debug drawing
                 #w, h = char_mask.template.shape[::-1] # invert W, H. shape returns them inverted.
+                '''
+                #Better way to find out side. only need one template.
+                location = matchTemplate(char_mask.template, clip_frame_gray, 0.8, True)
+                if location != False:
+                    #print("Found template: ", char_mask.filepath," At time: ", format_timestamp(sec), " At location: ", location)
+                    if location[0] < clip_frame_gray.shape[::-1][0]/2: #320: # if on left side of screen
+                '''
                 if matchTemplate(char_mask.template, clip_frame_gray, 0.7):
                     #debug print("Found template: ", char_mask.filepath," At time: ", sec)
                     if '-left' in os.path.basename(char_mask.filepath):
@@ -254,3 +282,5 @@ if __name__ == '__main__':
     print("Processed the video in ", time.strftime("%H:%M:%S", time.gmtime(benchmarkTimeElapsed)))
     print("Writing to html.")
     writeToHtml(foundMatches, args.youtube_url)
+    print("Downloading 720P frames")
+    downloadFrames(foundMatches, args.youtube_url)
