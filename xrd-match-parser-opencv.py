@@ -16,11 +16,16 @@ MASKS_DIRPATH = os.path.join(
 #TODO: Automated video rebuilding? if found >30min of specific player footage, get timestamps to matches (start - end)
 # download the 720P clips and cut all back together with ffmpeg?
 # automated YT upload of the footage?
+
 # Make browser userscript that loads these info instead and automatically plays the video?
 # Automated montages that way without having to reupload vids?
 # https://developers.google.com/youtube/iframe_api_reference?csw=1
 # ytplayer = document.getElementById("movie_player");
 # ytplayer.getCurrentTime();
+# The html file would recognize each set of matches,
+# when you click on whatever element (PLAYER NAME, CHARACTER) it will autoplay matches containing those and 
+# skip over the ones that do not.
+# for example, clicking on johnny would show me all johnny matches from the vod and skip over everything else.
 
 #USE_OPENCL = cv2.ocl.haveOpenCL()
 USE_OPENCL = False
@@ -107,13 +112,30 @@ def downloadMatches(foundMatches, url):
     #TODO: Delete previously downloaded matches
     count = 0
     for match in foundMatches:
-        downloadUrl = subprocess.check_output('youtube-dl --format "best" -g {}'.format(url)).decode('utf-8').strip()
+        # 720P60 quality --format "bestvideo+bestaudio/best"
+         #251          webm       audio only DASH audio  132k , opus @160k, 68.00MiB
+         #302          webm       1280x720   720p60 3033k , vp9, 60fps, video only, 1.51GiB
+        #downloadUrl = subprocess.check_output('youtube-dl --format 302 -g {}'.format(url)).decode('utf-8').strip()
+        videoUrl = subprocess.check_output('youtube-dl --format bestvideo[ext=webm] -g {}'.format(url)).decode('utf-8').strip()
+        audioUrl = subprocess.check_output('youtube-dl --format bestaudio[ext=webm] -g {}'.format(url)).decode('utf-8').strip()
+        # TODO: add audio streams, maybe with "bestvideo+bestaudio/best" and then get both stream urls and -map 1:a
+        # TODO: Check audio sync?
+        subprocess.check_call('ffmpeg -ss {} -i "{}" -ss {} -i "{}" -t {} -c:v copy -c:a copy matches/match_{}.webm'.format(
+            str(datetime.timedelta(seconds=int(match.timeStamp))),
+            videoUrl,
+            str(datetime.timedelta(seconds=int(match.timeStamp))),
+            audioUrl,
+            match.timeStampEnd - match.timeStamp,
+            count
+        ))
+        '''
         subprocess.check_call('ffmpeg -ss {} -i "{}" -t {} -map 0:v -c:v libvpx matches/match_{}.webm'.format(
             str(datetime.timedelta(seconds=int(match.timeStamp))),
             downloadUrl,
             match.timeStampEnd - match.timeStamp,
             count
         ))
+        '''
         count = count+1
 
 # Download only second into the match round start for info parsing
