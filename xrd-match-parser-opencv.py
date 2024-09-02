@@ -259,17 +259,6 @@ if __name__ == '__main__':
     #clip = VideoFileClip(videoFileName, audio=False)
     foundMatches = []
     next_sec = 0
-    # 2m 55s on 240p with roundstart search
-    # 00:03:24 with practice mode detection
-    # 00:03:24 with cropped frames, pointless optimization?
-    # Processed the 240P video in  00:02:35 with openCL
-    # Processed the 240P video in  00:02:28 with OpenCL
-    # Processed the 240P video in  00:01:50 without OpenCL
-    # Processed the 240P video in  00:01:30 with opencv video instead of moviepy.
-    # Processed the 240P video in  00:01:30 with cropped image, seems to be no difference.
-    # Processed the 240P video in  00:01:37 with match end search
-    # around 2m on 240p without roundstart and pmode detect
-    # Processing speed ATM:  clip 1H:1M = processing 1M:1S
     
     benchmarkTimeStart = time.time() #see how long we took to process the video file.
     lookingForRoundOne = False
