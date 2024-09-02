@@ -7,28 +7,16 @@ import time
 import cv2
 import numpy as np
 from PIL import Image
+#import pytesseract
 
 MASKS_DIRPATH = os.path.join(
     os.path.dirname(__file__),
     'templates',
 )
 
-#TODO: Automated video rebuilding? if found >30min of specific player footage, get timestamps to matches (start - end)
-# download the 720P clips and cut all back together with ffmpeg?
-# automated YT upload of the footage?
-
-# Make browser userscript that loads these info instead and automatically plays the video?
-# Automated montages that way without having to reupload vids?
-# https://developers.google.com/youtube/iframe_api_reference?csw=1
-# ytplayer = document.getElementById("movie_player");
-# ytplayer.getCurrentTime();
-# The html file would recognize each set of matches,
-# when you click on whatever element (PLAYER NAME, CHARACTER) it will autoplay matches containing those and 
-# skip over the ones that do not.
-# for example, clicking on johnny would show me all johnny matches from the vod and skip over everything else.
-
 #USE_OPENCL = cv2.ocl.haveOpenCL()
 USE_OPENCL = False
+#pytesseract.pytesseract.tesseract_cmd = 'C:\\Apps\\Tesseract-OCR\\tesseract'
 
 class Match(object):
     def __init__(self, timeStamp, timeStampEnd, charLeft, charRight, playerOne, playerTwo):
@@ -300,7 +288,7 @@ if __name__ == '__main__':
         if USE_OPENCL: clip_frame_gray = cv2.UMat(cv2.cvtColor(clip_frame, cv2.COLOR_BGR2GRAY))
         else: clip_frame_gray = cv2.cvtColor(clip_frame, cv2.COLOR_BGR2GRAY)
 
-        #DEBUG
+        #DEBUG show the frame we're analysing currently
         #cv2.imshow('frame',clip_frame)
         #if cv2.waitKey(1) & 0xFF == ord('q'): #wait 1ms
         #    break
@@ -361,8 +349,13 @@ if __name__ == '__main__':
             foundMatch = Match(0, 0, "unknown", "unknown", "unknown", "unknown")
             #cropped_frame_char_gray = clip_frame_gray[0:40,0:426]  # Crop from {x, y, w, h } 
             #cropped_frame_player_gray = clip_frame_gray[150:240,0:426]  # Crop from {x, y, w, h } 
-            #cv2.imshow('frame',cropped_frame_player_gray)
-            #cv2.waitKey(0) 
+
+            clip_frame_gray_tesseract = cv2.threshold(clip_frame_gray, 0, 255, cv2.THRESH_BINARY | cv2.THRESH_OTSU)[1]
+
+            #print("Tesseract OCR result: ", pytesseract.image_to_string(clip_frame_gray_tesseract, config='--psm 8'))
+            # DEBUG show current frame
+            cv2.imshow('frame',clip_frame_gray_tesseract)
+            cv2.waitKey(0) 
             #Extract the character and player info from VS screen.
             foundMatch = searchForChars(clip_frame_gray, foundMatch)
             foundMatch = searchForPlayers(clip_frame_gray, foundMatch)
